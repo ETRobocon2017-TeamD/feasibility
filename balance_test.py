@@ -54,7 +54,7 @@ class Motor(object):
         while self._is_loop:
             # メインスレッドからの指示を受信
             command = self.command_queue.get()
-            while not self.command_queue.empty() and False:
+            while not self.command_queue.empty():
                 try:
                     # 2つ以上queueにあれば古いのを捨てて新しい指示を実行する
                     command = self.command_queue.get_nowait()
@@ -110,23 +110,21 @@ class Robot(object):
         u"""ロボットメインループ"""
         elapsed_times = []
         balance.balance_init()
-        gyro_offset = self.gyro_sensor.angle  # XXX: 起動時のジャイロの値で良い？
         print('ready')
         # ジャイロセンサーの値
-        # XXX: 幾つかモードがあるけどANGでいいんだろうか
-        # http://python-ev3dev.readthedocs.io/en/latest/sensors.html#ev3dev.core.GyroSensor.angle
-        # 電圧(μV)　これは合ってるはず
+        # http://python-ev3dev.readthedocs.io/en/latest/sensors.html#ev3dev.core.GyroSensor.rate
+        # 電圧(μV)
         # http://python-ev3dev.readthedocs.io/en/latest/other.html#ev3dev.core.PowerSupply.measured_voltage
         # "motor count"（エンコーダ値）
         # XXX: "count" "encode"でAPIドキュメントを探してこれが一番それっぽかったけど合ってるのか、あまり自信なし
         # http://python-ev3dev.readthedocs.io/en/latest/motors.html#ev3dev.core.Motor.position
-        for _ in range(1000):
+        for _ in range(100):
             start = datetime.datetime.now()
             left_pwm, right_pwm = balance.balance_control(
                 0,  # forward -100～100, 0で停止
                 0,  # turn -100～100, 0で直進
-                self.gyro_sensor.angle,  # balance.cのecrobot_get_gyro_sensor(NXT_PORT_S4)のつもり
-                gyro_offset,
+                self.gyro_sensor.rate,  # balance.cのecrobot_get_gyro_sensor(NXT_PORT_S4)のつもり
+                0,  # offset（角速度）は0固定（起動時は角速度が変化しないように固定しておくこと）
                 self.left_motor.get_position(),  # balance.cのnxt_motor_get_count(NXT_PORT_C)のつもり
                 self.right_motor.get_position(),
                 self.battery.measured_voltage / 1000  # measured_voltageはマイクロボルトなのでミリボルトにする
