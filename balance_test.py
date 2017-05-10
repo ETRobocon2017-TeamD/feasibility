@@ -74,6 +74,11 @@ class Motor(object):
 class Robot(object):
     u"""ロボット本体"""
     BASE_SLEEP_TIME_US = balance.EXEC_PERIOD * 1000000
+    
+    gyro1 = 0
+    gyro2 = 0
+    gyro3 = 0
+    gyro4 = 0
 
     def __init__(self):
         self.right_motor = Motor('outA')
@@ -118,28 +123,47 @@ class Robot(object):
         # "motor count"（エンコーダ値）
         # XXX: "count" "encode"でAPIドキュメントを探してこれが一番それっぽかったけど合ってるのか、あまり自信なし
         # http://python-ev3dev.readthedocs.io/en/latest/motors.html#ev3dev.core.Motor.position
-        for _ in range(100):
-            start = datetime.datetime.now()
-            left_pwm, right_pwm = balance.balance_control(
-                0,  # forward -100～100, 0で停止
-                0,  # turn -100～100, 0で直進
-                self.gyro_sensor.rate,  # balance.cのecrobot_get_gyro_sensor(NXT_PORT_S4)のつもり
-                0,  # offset（角速度）は0固定（起動時は角速度が変化しないように固定しておくこと）
-                self.left_motor.get_position(),  # balance.cのnxt_motor_get_count(NXT_PORT_C)のつもり
-                self.right_motor.get_position(),
-                self.battery.measured_voltage / 1000  # measured_voltageはマイクロボルトなのでミリボルトにする
-            )
+        for _ in range(1000):
+        #    start = datetime.datetime.now()
+        #    left_pwm, right_pwm = balance.balance_control(
+        #        0,  # forward -100～100, 0で停止
+        #        0,  # turn -100～100, 0で直進
+        #        self.gyro_sensor.rate,  # balance.cのecrobot_get_gyro_sensor(NXT_PORT_S4)のつもり
+        #        0,  # offset（角速度）は0固定（起動時は角速度が変化しないように固定しておくこと）
+        #        self.left_motor.get_position(),  # balance.cのnxt_motor_get_count(NXT_PORT_C)のつもり
+        #        self.right_motor.get_position(),
+        #        self.battery.measured_voltage / 1000  # measured_voltageはマイクロボルトなのでミリボルトにする
+        #    )
             # balance_controlからは-100～100までのPWM値が返ってくる
+            self.gyro4 = self.gyro3 / 2
+            self.gyro3 = self.gyro2 / 2
+            self.gyro2 = self.gyro1 / 2
+            self.gyro1 = self.gyro_sensor.rate * 2
+            left_pwm = - self.gyro4 - self.gyro3 - self.gyro2 - self.gyro1
+            right_pwm = left_pwm
+            if left_pwm > 100:
+                left_pwm = 100
+            if left_pwm < -100:
+                left_pwm = -100
+            if right_pwm > 100:
+                right_pwm = 100
+            if right_pwm < -100:
+                right_pwm = -100
+
+            #ToDo 今までからのgyro_sensor.rateの合計値が0になる様にしていく！
+            
+            print("{0} {1} {2}".format(self.gyro1, right_pwm, left_pwm))
+            
             self.right_motor.run(speed=right_pwm)
             self.left_motor.run(speed=left_pwm)
 
             # 余った時間はsleep
-            elapsed_microsecond = (datetime.datetime.now() - start).microseconds
-            elapsed_times.append(elapsed_microsecond)
-            if elapsed_microsecond < self.BASE_SLEEP_TIME_US:
-                sleep_time = (self.BASE_SLEEP_TIME_US - elapsed_microsecond) / 1000000
-                time.sleep(sleep_time)
-        print('\n'.join([str(time_) for time_ in elapsed_times]))
+        #    elapsed_microsecond = (datetime.datetime.now() - start).microseconds
+        #    elapsed_times.append(elapsed_microsecond)
+        #    if elapsed_microsecond < self.BASE_SLEEP_TIME_US:
+        #        sleep_time = (self.BASE_SLEEP_TIME_US - elapsed_microsecond) / 1000000
+        #        time.sleep(sleep_time)
+        #print('\n'.join([str(time_) for time_ in elapsed_times]))
 
 
 if __name__ == '__main__':
