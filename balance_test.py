@@ -75,10 +75,7 @@ class Robot(object):
     u"""ロボット本体"""
     BASE_SLEEP_TIME_US = balance.EXEC_PERIOD * 1000000
     
-    gyro1 = 0
-    gyro2 = 0
-    gyro3 = 0
-    gyro4 = 0
+    gyro = 0
 
     def __init__(self):
         self.right_motor = Motor('outA')
@@ -135,24 +132,19 @@ class Robot(object):
         #        self.battery.measured_voltage / 1000  # measured_voltageはマイクロボルトなのでミリボルトにする
         #    )
             # balance_controlからは-100～100までのPWM値が返ってくる
-            self.gyro4 = self.gyro3 / 2
-            self.gyro3 = self.gyro2 / 2
-            self.gyro2 = self.gyro1 / 2
-            self.gyro1 = self.gyro_sensor.rate * 2
-            left_pwm = - self.gyro4 - self.gyro3 - self.gyro2 - self.gyro1
-            right_pwm = left_pwm
-            if left_pwm > 100:
-                left_pwm = 100
-            if left_pwm < -100:
-                left_pwm = -100
-            if right_pwm > 100:
-                right_pwm = 100
-            if right_pwm < -100:
-                right_pwm = -100
-
-            #ToDo 今までからのgyro_sensor.rateの合計値が0になる様にしていく！
             
-            print("{0} {1} {2}".format(self.gyro1, right_pwm, left_pwm))
+            self.gyro = self.gyro + self.gyro_sensor.rate;
+            if self.gyro > 0:
+                left_pwm = -100
+                right_pwm = -100
+            if self.gyro < 0:
+                left_pwm = 100
+                right_pwm = 100
+            if self.gyro = 0:
+                left_pwm = 0
+                right_pwm = 0
+            
+            print("{0} {1} {2}".format(self.gyro, right_pwm, left_pwm))
             
             self.right_motor.run(speed=right_pwm)
             self.left_motor.run(speed=left_pwm)
