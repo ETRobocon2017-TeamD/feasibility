@@ -89,33 +89,25 @@ class BalanceParam(object):
         self.right_motor_position = 0
         self.battery_voltage = 0 #mV
     
-        self.lock = threading.Lock()
-
     def get_param(self):
         u"""最新入力パラメータ取得"""
-        with self.lock:
-            rate = self.gyro_sensor_rate
-            lpos = self.left_motor_position
-            rpos = self.right_motor_position
-            voltage = self.battery_voltage
+        rate = self.gyro_sensor_rate
+        lpos = self.left_motor_position
+        rpos = self.right_motor_position
+        voltage = self.battery_voltage
         
         return rate, lpos, rpos, voltage
     
     def end_thread(self):
         self._is_loop = False
-        
 
     def loop(self):
         u"""デバイスから現在の値を取得"""
         while self._is_loop:
-            with self.lock:
-                self.gyro_sensor_rate = self.gyro_sensor.rate
-            with self.lock:
-                self.left_motor_position = self.left_motor.get_position()
-            with self.lock:
-                self.right_motor_position = self.right_motor.get_position()
-            with self.lock:
-                self.battery_voltage = self.battery.measured_voltage / 1000 #measured_voltageはマイクロボルトなのでミリボルトにする
+            self.gyro_sensor_rate = self.gyro_sensor.rate
+            self.left_motor_position = self.left_motor.get_position()
+            self.right_motor_position = self.right_motor.get_position()
+            self.battery_voltage = self.battery.measured_voltage / 1000 #measured_voltageはマイクロボルトなのでミリボルトにする
             # 適当に1ms sleep
             time.sleep(0.001)
 
