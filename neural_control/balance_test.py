@@ -227,7 +227,10 @@ class Robot(object):
         self.right_motor.position = 0
         self.gyro_sensor.mode = 'GYRO-G&A'
         gyro_offset = self.gyro_sensor.angle
+        count_per_rot = self.left_motor.count_per_rot
         print('ready')
+        ev3.Sound.tone([(400, 100, 300), (400, 100, 300), (400, 100, 300), (800, 200, 0)]).wait()
+        print('go')
         for _ in range(500):
             start_time = time.time()
             gyro_angle, gyro_rate = self.gyro_sensor.rate_and_angle
@@ -235,14 +238,16 @@ class Robot(object):
 
             if abs(gyro_angle) > 45:
                 # 倒れた
+                ev3.Sound.tone([(800, 800, 0)])
                 print('taoreta ', gyro_angle, gyro_rate)
                 break
             left_motor_position = self.left_motor.position
+            left_motor_speed = self.left_motor.speed / count_per_rot
 
             # Neural Network
-            inputs = (left_motor_position / 100, 0, gyro_angle / 100, gyro_rate / 100)
-            input_list.append(inputs)
+            inputs = (left_motor_position / 500, left_motor_speed / 500, gyro_angle / 100, gyro_rate / 100)
             decided_action = self.agent.decide_action(inputs, greedy=True)
+            input_list.append([inputs, decided_action])
             if decided_action == Action.ACTION1:
                 pwm = -100
             else:
