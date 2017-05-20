@@ -1,141 +1,15 @@
 u"""OpenAI gymのCarPole-v0をQ-Learning（Neural Network版）で学習する"""
-import enum
 import gc
-import time
-import pickle
+import json
+import math
 import random
+import socket
+import time
 
 import ev3dev.ev3 as ev3
 
-
-def get_reward(observation):
-    """環境の値から報酬を計算する"""
-    x, _, angle, _ = observation
-    loss = abs(x + 1) ** 2 + abs(angle * 5 + 1) ** 2
-    return -loss
-
-
-class NeuralNetwork(object):
-    """ニューラルネットワークの学習管理クラス"""
-    INPUT_LAYER_NEURONS = 4  # 入力層ニューロン数
-    HIDDEN_LAYER_NEURONS = 16  # 隠れ層ニューロン数
-    OUTPUT_LAYER_NEURONS = 2  # 出力層ニューロン数 = Action数
-
-    LEARNING_RATE = 1e-3  # 学習率
-
-    def __init__(self, network_file_path):
-        # とりあえずバイアス項はなし
-        with open(network_file_path, 'rb') as file:
-            self.params = pickle.load(file)
-        self.output = None
-
-    def forward(self, x_input, should_save_output=False):
-        """ネットワークを順伝搬させて出力を計算する
-
-        入力層のニューロンは順に1, 2, ..., i, ...
-        隠れ層と出力層も同様にj, kと添字をふることにする
-        ここではuは入力値と重みの総和、φは任意の活性化関数、yはニューロンの出力とする
-        φ_hは隠れ層の活性化関数。ここではReLUを使う
-        φ_oは隠れ層の活性化関数。ここでは恒等関数を使う
-        """
-        # 隠れ層の計算
-        # u_j = Σ_i { x_i * w_ij }
-        u_hidden = self._poor_dot(x_input, self.params['W_INPUT'])
-        # y_j = φ_h(u_j)
-        y_hidden = self.relu(u_hidden)  # 活性化関数はReLU
-
-        # 出力層の計算
-        # u_k = Σ_j { y_j * w_jk }
-        u_output = self._poor_dot(y_hidden, self.params['W_HIDDEN'])
-        # y_k = φ_o(u_k)
-        y_output = u_output  # 活性化関数は恒等関数
-
-        # 誤差逆伝搬で使う出力値
-        if should_save_output:
-            self.output = {
-                'u_hidden': u_hidden,
-                'y_hidden': y_hidden,
-                'y_output': y_output,
-            }
-        return y_output
-
-    def back_propagation(self, x_input, target):
-        """誤差逆伝搬でネットワークの重みを更新する
-
-        誤差関数Eは、出力が連続値であるため自乗平均をとる
-        targetは教師信号の値
-        E = Σ_k{ (target_k - y_k)^2 } / 2
-
-        隠れ層 - 出力層間の重みは次の式で更新する
-        ηは学習率とする
-        w_jk = w_jk - η * Δw_jk
-        Δw_jk = ∂E/∂w_jk
-              = ∂E/∂y_k * ∂y_k/∂u_k * ∂u_k/∂w_jk
-              = (y_k - target_k) * φ_o'(u_k) * y_j
-        ここで
-        δ_output_k = (y_k - target_k) * φ_o'(u_k)
-        とおいておく
-
-        入力層 - 隠れ層間の重みは
-        w_ij = w_ij - η * Δw_ij
-        Δw_ij = ∂E/∂w_ij
-              = Σ_k{ ∂E/∂y_k * ∂y_k/∂u_k * ∂u_k/∂y_j * ∂y_j/∂u_j * ∂u_j/∂x_i }
-              = Σ_k{ (y_k - target_k) * φ_h'(u_k) * w_jk * φ'(u_j) * x_i }
-              = Σ_k{ δ_output_k * w_jk * φ_h'(u_j) * x_i }
-              = Σ_k{ δ_output_k * w_jk } * φ_h'(u_j) * x_i
-        """
-        if self.output is None:
-            return
-        # 誤差逆伝搬では順伝搬で計算したニューロン出力値を使う
-        u_hidden = self.output['u_hidden']
-        y_hidden = self.output['y_hidden']
-        y_output = self.output['y_output']
-
-        # 隠れ層 - 出力層間の重みを更新
-        # 出力層の活性化関数は恒等関数なので、φ_o'(u_k) = 1
-        delta_o = []
-        for y_output_k, target_k in zip(y_output, target):
-            delta_o.append(y_output_k - target_k)
-
-        for j, y_hidden_j in enumerate(y_hidden):
-            for k, delta_o_k in enumerate(delta_o):
-                self.params['W_HIDDEN'][j][k] += -self.LEARNING_RATE * y_hidden_j * delta_o_k
-
-        # 入力層 - 隠れ層間の重みを更新
-        # φ_h'(u_j)はReLUの微分
-        delta_relu = [value > 0 for value in u_hidden]
-        # delta_w1_tmpは　Σ_k{ δ_output_k * w_jk } * φ_h'(u_j) までの計算
-        delta_w1_dot = self._poor_dot(delta_o, self.params['W_HIDDEN'])
-        delta_w1_tmp = []
-        for delta_relu_j, delta_w1_dot_j in zip(delta_relu, delta_w1_dot):
-            delta_w1_tmp.append(delta_relu_j * delta_w1_dot_j)
-
-        for i, x_input_i in enumerate(x_input):
-            for j, delta_w1_j in enumerate(delta_w1_tmp):
-                self.params['W_INPUT'][i][j] += -self.LEARNING_RATE * x_input_i * delta_w1_j
-
-    @staticmethod
-    def relu(inputs):
-        """活性化関数ReLU"""
-        return [value if value > 0 else 0 for value in inputs]
-
-    @staticmethod
-    def _poor_dot(value_1d, value_2d):
-        u"""np.dotの代用。1次元配列と2次元配列のみ受け付ける"""
-        outputs = [0] * len(value_2d[0])
-        for input_, weight_i in zip(value_1d, value_2d):
-            for j, weight in enumerate(weight_i):
-                outputs[j] += input_ * weight
-        return outputs
-
-
-class Action(enum.Enum):
-    u"""エージェントが取りうる行動"""
-    u"""前に全力"""
-    ACTION1 = 0
-
-    u"""後ろに全力"""
-    ACTION2 = 1
+from environment import Action
+from neuron import NeuralNetwork
 
 
 class Agent(object):
@@ -158,27 +32,6 @@ class Agent(object):
         else:
             # 最適の行動を選択する(greedy)
             return self._greedy(action_values)
-
-    def update_action_value(self, state, decided_action, reward, next_state):
-        """Q-Learningアルゴリズムでネットワークを更新する
-
-        元のQ-Learningの更新式は
-        Q(St, At) ← (1 - η)Q(St, At) + η(Rt+1 + γ * max_a{Q(St+1, At+1))}
-        または式変形して
-        Q(St, At) ← η( Rt+1 + γ * max_a{Q(St+1, At+1)} - Q(St, At) )
-
-        この
-        Rt+1 + γ * max_a{Q(St+1, At+1)}
-        が教師信号targetとなる
-        """
-        next_action_values = self.network.forward(next_state, should_save_output=False)
-        next_max_action_value = max(next_action_values)
-        target = list(self.network.output['y_output'])
-        # 実際に選択した行動については報酬から教師信号を計算する
-        # 　→選択しなかった行動は更新させない
-        target[decided_action.value] = reward + self.gamma * next_max_action_value
-        # 誤差逆伝搬でネットワークを更新する
-        self.network.back_propagation(state, target)
 
     @staticmethod
     def _explore():
@@ -205,12 +58,16 @@ class Robot(object):
     u"""ロボット本体"""
 
     BASE_SLEEP_TIME = 0.02
+    DEG_TO_RAD = (2 * math.pi) / 360
+    GYRO_OFFSET = -86
+    SERVER_HOST = ('192.168.0.209', 8888)
 
     def __init__(self):
         self.right_motor = ev3.LargeMotor('outA')
         self.left_motor = ev3.LargeMotor('outC')
         self.gyro_sensor = ev3.GyroSensor('in4')
         self.agent = Agent('network.pickle')
+        self.touch_sensor = ev3.TouchSensor('in1')
 
     def run(self):
         u"""ロボット稼働"""
@@ -221,35 +78,75 @@ class Robot(object):
 
     def _main_loop(self):
         u"""ロボットメインループ"""
+        self.count_per_rot = self.left_motor.count_per_rot
+        sample_list = []
+
+        self._calibration()
+
+        for i_episode in range(100):
+            # 起こしてもらえるまで待つ
+            ev3.Sound.tone([(400, 30, 100), (400, 30, 0)]).wait()
+            tmp_angle, _ = self.gyro_sensor.rate_and_angle
+            while abs(tmp_angle - self.GYRO_OFFSET) > 5:
+                tmp_angle, _ = self.gyro_sensor.rate_and_angle
+                print('wait for stand up...', tmp_angle)
+                if self.touch_sensor.value():
+                    self._calibration()
+                time.sleep(0.5)
+
+            print('ready')
+            ev3.Sound.tone([(400, 100, 300), (400, 100, 300), (400, 100, 300), (800, 200, 0)]).wait()
+            print('go')
+
+            gc.disable()
+            self.left_motor.position = 0
+            self.right_motor.position = 0
+            training_sample = self._balance()
+            sample_list.append(training_sample)
+            self._stop()
+            gc.enable()
+
+            if i_episode <= 10 or i_episode % 10 == 0:
+                # トレーニング結果を送信して学習してもらう
+                params = self._train_on_server(sample_list)
+                self.agent.network.update_network(params)
+                sample_list = []
+
+    def _balance(self):
+        inputs_list = []
+        action_list = []
         elapsed_times = []
-        input_list = []
-        self.left_motor.position = 0
-        self.right_motor.position = 0
-        self.gyro_sensor.mode = 'GYRO-G&A'
-        gyro_offset = self.gyro_sensor.angle
-        count_per_rot = self.left_motor.count_per_rot
-        print('ready')
-        ev3.Sound.tone([(400, 100, 300), (400, 100, 300), (400, 100, 300), (800, 200, 0)]).wait()
-        print('go')
         for _ in range(500):
             start_time = time.time()
             gyro_angle, gyro_rate = self.gyro_sensor.rate_and_angle
-            gyro_angle -= gyro_offset
+            gyro_angle -= self.GYRO_OFFSET
 
-            if abs(gyro_angle) > 45:
+            if abs(gyro_angle) > 20:
                 # 倒れた
                 ev3.Sound.tone([(800, 800, 0)])
                 print('taoreta ', gyro_angle, gyro_rate)
                 break
-            left_motor_position = self.left_motor.position
-            left_motor_speed = self.left_motor.speed / count_per_rot
+            left_motor_position = 0  # self.left_motor.position
+            left_motor_speed = 0  # self.left_motor.speed / self.count_per_rot
 
             # Neural Network
-            inputs = (left_motor_position / 500, left_motor_speed / 500, gyro_angle / 100, gyro_rate / 100)
+            inputs = (
+                (left_motor_position - gyro_angle) / 500,
+                (left_motor_speed - gyro_rate) / 500,
+                gyro_angle * self.DEG_TO_RAD,
+                gyro_rate * self.DEG_TO_RAD
+            )
+            inputs_list.append(inputs)
             decided_action = self.agent.decide_action(inputs, greedy=True)
-            input_list.append([inputs, decided_action])
+            action_list.append(decided_action)
             if decided_action == Action.ACTION1:
                 pwm = -100
+            elif decided_action == Action.ACTION2:
+                pwm = -70
+            elif decided_action == Action.ACTION3:
+                pwm = 0
+            elif decided_action == Action.ACTION4:
+                pwm = 70
             else:
                 pwm = 100
 
@@ -262,14 +159,35 @@ class Robot(object):
                 sleep_time = self.BASE_SLEEP_TIME - elapsed_second
                 time.sleep(sleep_time)
         print('total')
-        for time_, inputs in zip(elapsed_times, input_list):
-            print(time_, inputs)
+        for time_, inputs, action in zip(elapsed_times, inputs_list, action_list):
+            print('time: {:0.3f} / input: {: .3f}, {: .3f}, {: .3f}, {: .3f} / decide: {}'.
+                  format(time_, inputs[0], inputs[1], inputs[2], inputs[3], action.value)
+                  )
+        return inputs_list
 
     def _stop(self):
         self.left_motor.stop()
         self.right_motor.stop()
 
+    def _calibration(self):
+        # ジャイロのキャリブレーション
+        # このときうつ伏せに寝かせていること
+        self.gyro_sensor.mode = 'GYRO-CAL'
+        self.gyro_sensor.mode = 'GYRO-G&A'
+        ev3.Sound.tone([(800, 300, 0)]).wait()
+
+    def _train_on_server(self, data):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect(self.SERVER_HOST)
+            # 学習サンプルデータ送信
+            data_json = json.dumps(data)
+            sock.sendall(bytes(data_json + '\n', 'UTF-8'))
+            # 学習後パラメータ受信
+            sock_rfile = sock.makefile()
+            received_data = sock_rfile.readline().strip()
+            print(received_data)
+        return json.loads(received_data)
+
 if __name__ == '__main__':
-    gc.disable()
     robot = Robot()
     robot.run()
