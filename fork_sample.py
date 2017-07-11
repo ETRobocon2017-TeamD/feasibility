@@ -1,7 +1,6 @@
 import mmap
 import os
 import sys
-import forkTestChild
 
 sharedMemory = mmap.mmap(-1, 13)
 sharedMemory.write(b"Hello world!")
