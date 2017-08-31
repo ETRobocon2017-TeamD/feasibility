@@ -1,5 +1,3 @@
-from ev3dev.auto import *
-from ev3dev.helper import Tank
 import time
 from math import *
 
@@ -11,6 +9,8 @@ class Odometry:
         self.distance_periodic_R = 0.0  # 右タイヤの4ms間の距離
         self.pre_angleL = 0.0
         self.pre_angleR = 0.0  # 左右モータ回転角度の過去値
+        self.pre_pos_x = 0
+        self.pre_pos_y = 0
 
         self.total_direction = 0.0 #現在の角度
         self.total_distance = 0.0 #現在の距離
@@ -23,20 +23,21 @@ class Odometry:
 
         self.TREAD = 132.6 # 車体トレッド幅(132.6mm)
         self.PI = 3.14159265358
+        self.TIRE_DIAMETER = 81.0  #タイヤ直径（81mm）
 
         # 目標地点の設定 (mm)
         self.target_pos = [[0 for i in range(2)] for j in range(10)]
         self.cur_target_index =0
-        set_target(100,50)
-        set_target(200,200)
-        set_target(200,400)
-        set_target(200,600)
-        set_target(400,1000)
-        set_target(400,1000)
-        set_target(400,1000)
-        set_target(100,1500)
-        set_target(100,1200)
-        set_target(100,1200)
+        self.set_target(100,50)
+        self.set_target(200,200)
+        self.set_target(200,400)
+        self.set_target(200,600)
+        self.set_target(400,1000)
+        self.set_target(400,1000)
+        self.set_target(400,1000)
+        self.set_target(100,1500)
+        self.set_target(100,1200)
+        self.set_target(100,1200)
 
         self.cur_target_index =0
 
@@ -73,8 +74,11 @@ class Odometry:
 
 
         # 現在の位置を計算
-        pos_x = self.pre_pos_x + (cur_dis * math.cos(math.radians(cur_dir))) #進行距離 * cos x
-        pos_y = self.pre_pos_y + (cur_dis * math.sin(math.radians(cur_dir))) #進行距離 * sin x
+        pos_x = self.pre_pos_x + (cur_dis * cos(radians(cur_dir))) #進行距離 * cos x
+        pos_y = self.pre_pos_y + (cur_dis * sin(radians(cur_dir))) #進行距離 * sin x
+
+        self.pre_pos_x = pos_x
+        self.pre_pos_y = pos_y
 
 
         # 目標座標までの方位，距離を格納
@@ -84,8 +88,10 @@ class Odometry:
 
         #targetとの差分から速度と角度を調整
         #角度の差に比例すべき？
-        if target_dir <= 0 :
+        if target_dir < 0 :
             direction = self.pre_direction_pwm + 5
+        elif target_dir == 0:
+            direction = 0
         else:
             direction = self.pre_direction_pwm - 5
 
@@ -102,6 +108,10 @@ class Odometry:
         if abs(self.target_pos[0][self.cur_target_index] - pos_x) < 5 and abs(self.target_pos[1][self.cur_target_index] - pos_y) < 5:
             cur_target_index +=1
 
+        #testlog
+        print("{},{},{},{},{},{},{},{}".format(left_angle, right_angle,cur_dis, cur_dir, pos_x, pos_y,target_dis,target_dir))
+
+
         return direction, speed
 
 
@@ -116,8 +126,8 @@ class Odometry:
         distance = 0.0 # 前回との距離
 
         # 計測間の走行距離 = ((円周率 * タイヤの直径) / 360) * (モータ角度過去値　- モータ角度現在値)
-        self.distance_periodic_L = ((PI * TIRE_DIAMETER) / 360.0) * (cur_angleL - self.pre_angleL) # 計測間の左モータ距離
-        self.distance_periodic_R = ((PI * TIRE_DIAMETER) / 360.0) * (cur_angleR - self.pre_angleR) # 計測間の右モータ距離
+        self.distance_periodic_L = ((self.PI * self.TIRE_DIAMETER) / 360.0) * (cur_angleL - self.pre_angleL) # 計測間の左モータ距離
+        self.distance_periodic_R = ((self.PI * self.TIRE_DIAMETER) / 360.0) * (cur_angleR - self.pre_angleR) # 計測間の右モータ距離
         distance = (self.distance_periodic_L + self.distance_periodic_R) / 2.0 # 左右タイヤの走行距離を足して割る
         self.total_distance += distance
 
@@ -131,7 +141,7 @@ class Odometry:
     #/ *方位を取得(右旋回が正転) * /
     def get_direction(self):
         # (360 / (2 * 円周率 * 車体トレッド幅)) * (右進行距離 - 左進行距離)
-        direction = (360.0 / (2.0 * self.PI * self.TREAD)) * (self.distance_periodic_L - self.distance_periodic_R)
+        direction = (360.0 / (2.0 * self.PI * self.TREAD)) * ( self.distance_periodic_R - self.distance_periodic_L)
         self.total_direction += direction
         return direction
 
