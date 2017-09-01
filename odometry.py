@@ -1,3 +1,4 @@
+# coding:utf-8
 import time
 from math import *
 
@@ -25,6 +26,13 @@ class Odometry:
         self.PI = 3.14159265358
         self.TIRE_DIAMETER = 81.0  #タイヤ直径（81mm）
 
+        #調整用パラメータ
+        self.turning_angle = 5 #旋回時のPWM上昇値 1ループごとに加算(減算)する
+        self.target_area_x = 50 #目標地点の到達判定領域 x軸(mm)
+        self.target_area_y = 50 #目標地点の到達判定領域 y軸(mm)
+        self.run_speed = 40 #PWM値ロボットの進行速度
+
+
         # 目標地点の設定 (mm)
         self.target_pos = [[0 for i in range(2)] for j in range(10)]
         self.cur_target_index =0
@@ -40,6 +48,9 @@ class Odometry:
         self.set_target(100,1200)
 
         self.cur_target_index =0
+
+        self.odmetry_logs = ["" for _ in range(10000)]
+        self.odmetry_log_pointer = 0
 
 
         # # 目標座標までの方位，距離を格納
@@ -89,15 +100,15 @@ class Odometry:
         #targetとの差分から速度と角度を調整
         #角度の差に比例すべき？
         if target_dir < 0 :
-            direction = self.pre_direction_pwm + 5
+            direction = self.pre_direction_pwm + self.turning_angle
         elif target_dir == 0:
             direction = 0
         else:
-            direction = self.pre_direction_pwm - 5
+            direction = self.pre_direction_pwm - self.turning_angle
 
-        #距離に比例してスピードを出すべき?
+        #TODO:距離に比例してスピードを出すべきか検討
         #計測してから
-        speed = 40
+        speed = self.run_speed
 
         #前回値として保管
         self.pre_direction_pwm = direction
@@ -105,17 +116,25 @@ class Odometry:
 
         #目標に到達していたらindexを進める
         #TODO:目標近傍の閾値について検討
-        if abs(self.target_pos[0][self.cur_target_index] - pos_x) < 5 and abs(self.target_pos[1][self.cur_target_index] - pos_y) < 5:
+        if abs(self.target_pos[0][self.cur_target_index] - pos_x) < self.target_area_x and abs(self.target_pos[1][self.cur_target_index] - pos_y) < self.target_area_y:
             cur_target_index +=1
 
-        #testlog
-        print("{},{},{},{},{},{},{},{}".format(left_angle, right_angle,cur_dis, cur_dir, pos_x, pos_y,target_dis,target_dir))
 
+        #log
+        self.odmetry_logs[self.odmetry_log_pointer] = "{},{},{},{},{},{},{},{},{},{}".format(
+            left_angle,
+            right_angle,
+            cur_dis,
+            cur_dir,
+            pos_x,
+            pos_y,
+            target_dis,
+            target_dir,
+            self.total_distance,
+            self.total_direction)
+        self.odmetry_log_pointer += 1
 
-        return direction, speed
-
-
-
+        return speed, direction
 
     # 距離 計測
     # left_motor  左モータ回転角度の現在値
@@ -166,3 +185,9 @@ class Odometry:
         target_dir = target_dir * 180.0 / self.PI
         return target_dir
 
+    def shutdown(self, log_datetime):
+        log_file = open("./log/log_odometry_{}.csv".format(log_datetime), 'w')
+        for log in self.odmetry_logs:
+            if log != "":
+                log_file.write("{}\n".format(log))
+        log_file.close()
