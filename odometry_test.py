@@ -1,3 +1,4 @@
+# coding:utf-8
 from odometry import Odometry
 import datetime
 import time
@@ -45,6 +46,9 @@ class Testloop:
             if log != "":
                 log_file.write("{}\n".format(log))
         log_file.close()
+
+        #ログ記録用
+        self.odometry.shutdown(0000)
 
 
 if __name__ == '__main__':
